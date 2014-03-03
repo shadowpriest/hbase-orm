@@ -1,4 +1,4 @@
-package net.zhou.bean;
+package net.zhou.hbase;
 
 import net.zhou.hbase.HField;
 import net.zhou.hbase.HRowField;
@@ -16,13 +16,13 @@ public class Person {
 
 	@HField(q = "bytev")
 	private byte bytev;
-
+	
 	@HField(q = "charv")
 	private char charv;
-
+	
 	@HField(q = "shortv")
 	private short shortv;
-
+	
 	@HField(q = "intv")
 	private int intv;
 
@@ -34,8 +34,8 @@ public class Person {
 
 	@HField(q = "doublev")
 	private double doublev;
-
-	@HField(q = "create_at", timestamp = true)
+	
+	@HField(q="create_at",timestamp=true)
 	private long createAt;
 
 	public long getId() {
@@ -109,6 +109,7 @@ public class Person {
 	public void setDoublev(double doublev) {
 		this.doublev = doublev;
 	}
+
 
 	public char getCharv() {
 		return charv;
@@ -185,4 +186,8 @@ public class Person {
 		return "Person [id=" + id + ", stringv=" + stringv + ", createAt=" + createAt + "]";
 	}
 
+
+	
+	
+	
 }

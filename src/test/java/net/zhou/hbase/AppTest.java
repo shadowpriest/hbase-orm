@@ -1,4 +1,4 @@
-package net.zhou.bean;
+package net.zhou.hbase;
 
 import junit.framework.Test;
 import junit.framework.TestCase;
