@@ -1,6 +1,5 @@
 package net.zhou.hbase;
 
-import java.io.IOException;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
@@ -16,6 +15,7 @@ import net.zhou.bean.TypeUtils;
 import net.zhou.dao.DaoException;
 import net.zhou.dao.RuntimeDaoException;
 
+import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.HTableInterface;
@@ -26,23 +26,40 @@ import org.apache.hadoop.hbase.client.ResultScanner;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.http.annotation.ThreadSafe;
 
+
 /**
+ * 
+ * 虽然没有一个抽象方法，但这是一个抽象类。
+ * 原因就在代码第90行
+ * 用户定义dao时，必须去继承HbaseDaoImpl。
+ * code example: 
+ * HbaseDaoImpl<Person, Long> dao= new HbaseDaoImpl<Person, Long>("for_testcase_do_not_drop"){};
+ * ！！！注意:最后的{}不要忘记。
  * 
  * @author zhou
  * 
- * @param <T>  T是数据库序列化、反序列化对象。
- * @param <K>  K是hbase的rowkey实际对应的对象。
+ * @param <T>
+ * @param <K>
  */
 @SuppressWarnings({ "unchecked", "deprecation" })
 @ThreadSafe
-public class HbaseDaoImpl<T, K> implements HbaseDao<T, K> {
-	private final String tableName;
+public abstract class HbaseDaoImpl<T, K> implements HbaseDao<T, K> {
+
 	protected Class<T> clazz;
-	private boolean autoflush = true;
-	private long writeBufferSize = -1;
+	private final ClientPara para = new ClientPara();
 	protected HTablePool tablePool;
+	protected final String tableName;
 	private BytesAdapter rowKeyAdapter;
 
+	/**
+	 * 
+	 * 用户定义dao时，必须去继承HbaseDaoImpl。 
+	 * code example: 
+	 * HbaseDaoImpl<Person, Long> dao= new HbaseDaoImpl<Person, Long>("for_testcase_do_not_drop"){};
+	 * ！！！注意:最后的{}不要忘记
+	 * 
+	 * @param tableName
+	 */
 	public HbaseDaoImpl(String tableName) {
 		this(tableName, null, null);
 	}
@@ -50,54 +67,32 @@ public class HbaseDaoImpl<T, K> implements HbaseDao<T, K> {
 	private HbaseDaoImpl(String tableName, Class<T> tclazz, Class<K> kclazz) {
 		this.tableName = tableName;
 		initClazz(tclazz, kclazz);
-		tablePool = new HTablePool() {
+		tablePool = HPool.createPool(para);
+	}
 
-			@Override
-			public HTableInterface getTable(String tableName) {
-				HTableInterface table = super.getTable(tableName);
-				if (!autoflush) {
-					table.setAutoFlush(autoflush);
-				}
-				if (writeBufferSize > 0) {
-					try {
-						table.setWriteBufferSize(writeBufferSize);
-					} catch (IOException e) {
-						throw new RuntimeDaoException(e);
-					}
-				}
-				return table;
-			}
+	public static <T> HbaseDaoImpl<T, Object> create(String tableName, Class<T> tclazz) {
+		return new HbaseDaoImpl<T, Object>(tableName, tclazz, Object.class) {
+		};
+	}
 
+	public static <T, K> HbaseDaoImpl<T, K> create(String tableName, Class<T> tclazz, Class<K> kclazz) {
+		return new HbaseDaoImpl<T, K>(tableName, tclazz, kclazz) {
 		};
 	}
 
 	/**
-	 * 根据tablename和类型直接生成一个dao
+	 * 如果没有定义tclazz和kclazz，那么会根据定义的泛型自动去匹配
 	 * 
-	 * @param tablename
-	 * @param tclazz T是数据库序列化、反序列化对象。
-	 * @return
+	 * @param tableName
+	 * @param tclazz
+	 * @param kclazz
 	 */
-	public static <T> HbaseDao<T, Object> create(final String tablename, Class<T> kclazz) {
-		return create(tablename, kclazz, Object.class);
-	}
-
-	/**
-	 * 
-	 * @param tablename
-	 * @param tclazz 
-	 * @param kclass
-	 * @return
-	 */
-	public static <T, K> HbaseDao<T, K> create(final String tablename, Class<T> tclazz, Class<K> kclass) {
-		return new HbaseDaoImpl<T, K>(tablename, tclazz, kclass);
-	}
-
 	private void initClazz(Class<T> tclazz, Class<K> kclazz) {
 		if (tclazz != null) {
 			clazz = tclazz;
 		} else {
 			Type mySuperClass = this.getClass().getGenericSuperclass();
+			this.getClass().getTypeParameters();
 			Type ttype = ((ParameterizedType) mySuperClass).getActualTypeArguments()[0];
 			clazz = (Class<T>) ttype;
 		}
@@ -138,7 +133,7 @@ public class HbaseDaoImpl<T, K> implements HbaseDao<T, K> {
 			table = tablePool.getTable(tableName);
 			return table.exists(get);
 		} catch (Throwable e) {
-			throw new DaoException("读取table_" + tableName + "出错。", e);
+			throw new DaoException("table:" + tableName, e);
 		} finally {
 			CloseUtils.close(table);
 		}
@@ -158,7 +153,7 @@ public class HbaseDaoImpl<T, K> implements HbaseDao<T, K> {
 			Result result = table.get(get);
 			return HbaseBeanUtils.fromResult(result, clazz);
 		} catch (Throwable e) {
-			throw new DaoException("读取table_" + tableName + "出错。", e);
+			throw new DaoException("table:" + tableName, e);
 		} finally {
 			CloseUtils.close(table);
 		}
@@ -179,7 +174,7 @@ public class HbaseDaoImpl<T, K> implements HbaseDao<T, K> {
 			Result result = table.get(get);
 			return HbaseBeanUtils.fromVersionedResult(result, clazz);
 		} catch (Throwable e) {
-			throw new DaoException("读取table_" + tableName + "出错。", e);
+			throw new DaoException("table:" + tableName, e);
 		} finally {
 			CloseUtils.close(table);
 		}
@@ -193,7 +188,7 @@ public class HbaseDaoImpl<T, K> implements HbaseDao<T, K> {
 			table = tablePool.getTable(tableName);
 			return table.get(get);
 		} catch (Throwable e) {
-			throw new DaoException("读取table_" + tableName + "出错。", e);
+			throw new DaoException("table:" + tableName, e);
 		} finally {
 			CloseUtils.close(table);
 		}
@@ -214,7 +209,7 @@ public class HbaseDaoImpl<T, K> implements HbaseDao<T, K> {
 				res.add(HbaseBeanUtils.fromResult(result, clazz));
 			}
 		} catch (Throwable e) {
-			throw new DaoException("读取出错。", e);
+			throw new DaoException("table:" + tableName, e);
 		} finally {
 			CloseUtils.close(table);
 		}
@@ -234,7 +229,7 @@ public class HbaseDaoImpl<T, K> implements HbaseDao<T, K> {
 			}
 			return res;
 		} catch (Throwable e) {
-			throw new DaoException("读取出错。", e);
+			throw new DaoException("table:" + tableName, e);
 		} finally {
 			CloseUtils.close(table);
 			CloseUtils.close(rs);
@@ -247,7 +242,12 @@ public class HbaseDaoImpl<T, K> implements HbaseDao<T, K> {
 	}
 
 	@Override
-	public void put(List<T> objs) throws DaoException {
+	public void putObject(Object obj) throws DaoException {
+		put((T) obj);
+	}
+
+	@Override
+	public void put(Collection<T> objs) throws DaoException {
 		List<Put> puts = new ArrayList<Put>();
 		for (T t : objs) {
 			puts.add(HbaseBeanUtils.toPut(t));
@@ -271,7 +271,7 @@ public class HbaseDaoImpl<T, K> implements HbaseDao<T, K> {
 
 	@Override
 	public void delete(K key) throws DaoException {
-		delele(Arrays.asList(key));
+		delele(Arrays.asList(rowKey(key)));
 	}
 
 	@Override
@@ -282,7 +282,7 @@ public class HbaseDaoImpl<T, K> implements HbaseDao<T, K> {
 			table = tablePool.getTable(tableName);
 			table.delete(del);
 		} catch (Throwable e) {
-			throw new DaoException("读取table_" + tableName + "出错。", e);
+			throw new DaoException("table:" + tableName, e);
 		} finally {
 			CloseUtils.close(table);
 		}
@@ -290,17 +290,27 @@ public class HbaseDaoImpl<T, K> implements HbaseDao<T, K> {
 	}
 
 	@Override
-	public void delele(List<K> keys) throws DaoException {
+	public void delele(Collection<byte[]> keys) throws DaoException {
+		delele(keys, HConstants.LATEST_TIMESTAMP);
+	}
+
+	@Override
+	public void delele(Collection<byte[]> keys, long timeStamp) throws DaoException {
 		List<Delete> ds = new ArrayList<Delete>();
-		for (K key : keys) {
-			ds.add(new Delete(rowKey(key)));
+		for (byte[] key : keys) {
+			ds.add(new Delete(key, timeStamp));
 		}
+		delele(ds);
+	}
+
+	@Override
+	public void delele(List<Delete> deletes) throws DaoException {
 		HTableInterface table = null;
 		try {
 			table = tablePool.getTable(tableName);
-			table.delete(ds);
+			table.delete(deletes);
 		} catch (Throwable e) {
-			throw new DaoException("删除出错", e);
+			throw new DaoException("table:" + tableName, e);
 		} finally {
 			CloseUtils.close(table);
 		}
@@ -312,19 +322,19 @@ public class HbaseDaoImpl<T, K> implements HbaseDao<T, K> {
 	}
 
 	public boolean isAutoflush() {
-		return autoflush;
+		return para.isAutoflush();
 	}
 
 	public void setAutoflush(boolean autoflush) {
-		this.autoflush = autoflush;
+		para.setAutoflush(autoflush);
 	}
 
 	public long getWriteBufferSize() {
-		return writeBufferSize;
+		return para.getWriteBufferSize();
 	}
 
 	public void setWriteBufferSize(long writeBufferSize) {
-		this.writeBufferSize = writeBufferSize;
+		para.setWriteBufferSize(writeBufferSize);
 	}
 
 	@Override
@@ -332,18 +342,9 @@ public class HbaseDaoImpl<T, K> implements HbaseDao<T, K> {
 		return rowKeyAdapter.toBytes(key);
 	}
 
-	/*
-	 * 禁止Override
-	 * 
-	 * @see net.zhou.hbase.HbaseDao#getTableName()
-	 */
 	@Override
 	public final String getTableName() {
 		return tableName;
 	}
-
-	
-	
-	
 
 }
